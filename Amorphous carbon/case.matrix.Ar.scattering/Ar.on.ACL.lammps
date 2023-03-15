@@ -1,0 +1,98 @@
+variable a loop 200
+log data/log.$a
+variable randomSeedForDeposit equal floor(random(1,9999,${a}))
+
+units           metal
+dimension       3
+processors      * * *
+boundary        p p f
+
+# read data
+atom_style      atomic
+
+variable xl equal 0
+variable xh equal 23
+variable yl equal 0
+variable yh equal 23
+variable zl equal 0
+variable zh equal 120
+
+region          box block ${xl} ${xh} ${yl} ${yh} ${zl} ${zh}
+create_box      3 box
+
+# read data file
+read_data       ../../../deposit.energy.1/ACL.deposit.on.Si.data add merge
+
+# delete the top atoms to make the surface smooth
+variable delete_above_zl equal 85.0
+region delete_block block INF INF INF INF ${delete_above_zl} INF units box
+group delete_group region delete_block
+delete_atoms group delete_group compress yes
+
+mass		3   39.948 # Ar
+
+# potential
+pair_style hybrid tersoff zbl 8.0 10.0
+pair_coeff * * tersoff /usr/local/apps/lammps/lammps-7Aug19/potentials/SiC_Erhart-Albe.tersoff Si C NULL
+# pair_coeff * * tersoff /home/d/projects/LAMMPS/potentials/SiC_Erhart-Albe.tersoff Si C NULL
+pair_coeff 1 3 zbl 14.0 18.0
+pair_coeff 2 3 zbl 6.0 18.0
+pair_coeff 3 3 none
+
+variable dt equal 0.0005 # 0.5fs
+timestep    ${dt}
+
+group Si_and_C type 1 2
+
+variable    sub_zh equal 59.7
+variable    freeze_zh equal 0.2*${sub_zh}
+region      freeze_block block INF INF INF INF INF ${freeze_zh} units box
+group		freeze_group region freeze_block
+fix     1   freeze_group setforce 0.0 0.0 0.0
+
+fix     2 Si_and_C nvt temp 300 300 $(100.0*dt)
+fix		3 Si_and_C wall/reflect zlo EDGE
+
+thermo          100
+thermo_style    custom step temp pe ke etotal press vol lx density
+thermo_modify   lost warn
+
+if "$a <= 10" then "dump 1 all custom 100 data/md.ACL.$a.txt id type x y z"
+# Equlibrate Si and C at 300K for 2ps
+run     4000
+
+variable slab_xl equal (${xh}-${xl})*0.0+${xl}
+variable slab_xh equal (${xh}-${xl})*1.0+${xl}
+variable slab_yl equal (${yh}-${yl})*0.0+${yl}
+variable slab_yh equal (${yh}-${yl})*1.0+${yl}
+variable slab_zl equal (${zh}-${zl})*0.9+${zl}
+variable slab_zh equal (${zh}-${zl})*0.95+${zl}
+
+region          slab block ${slab_xl} ${slab_xh} ${slab_yl} ${slab_yh} ${slab_zl} ${slab_zh} units box
+
+variable num_of_insert equal 10 #XXXX
+variable delta_step_insert equal 2000 # 1ps
+
+variable in_angle_degree equal XXX # degree
+variable in_energy equal YYY # eV
+variable in_angle equal ${in_angle_degree}/180*3.1415926 # rad
+variable in_velocity equal sqrt(2*${in_energy}*1.602E-19/6.633E-26)/100 # Angstrom/ps
+variable in_vz equal -${in_velocity}*cos(${in_angle})
+variable in_vy equal ${in_velocity}*sin(${in_angle})
+
+group	addatoms type 3
+fix		4 addatoms nve
+fix		5 addatoms deposit ${num_of_insert} 3 ${delta_step_insert} ${randomSeedForDeposit} region slab near 1.0 id next &
+    vz ${in_vz} ${in_vz} vy ${in_vy} ${in_vy} units box
+
+
+dump    2 addatoms custom 100 data/dump.velocity.$a.txt id type xs ys zs vx vy vz
+
+variable run_step equal (${num_of_insert}+5)*${delta_step_insert}
+run     ${run_step}
+
+write_data      ACL.deposit.on.Si.data
+
+clear
+next a
+jump Ar.on.ACL.lammps
