@@ -1,0 +1,44 @@
+# test amorphous C system with ReaxFF
+
+dimension   3
+boundary    p p p
+units		real
+atom_style	charge
+timestep    0.1 # fs
+
+# Create cubic box and some C atoms at random postions
+variable      cube_length equal 30.53
+region        sim_region block 0 ${cube_length} 0 ${cube_length} 0 ${cube_length} units box
+create_box    4 sim_region
+
+mass    1 28.0855  # Si
+mass    2 15.9994  # O
+mass    3 12.0107  # C
+mass    4 18.9984  # F
+
+# create_atoms  1 random 1000 1234 NULL mol SiF4 789
+create_atoms  3 random 2000 1234 NULL overlap 1.8 maxtry 100
+
+set type 3 charge 0
+
+pair_style	    reaxff NULL
+pair_coeff	    * * ../../../sticking.coefficients/sticking/ffield.reax.combined.COFSi.v4 Si O C F
+neighbor	    2. bin
+neigh_modify	every 10 delay 0 check no
+fix             2 all qeq/reaxff 1 0.0 10.0 1e-6 reaxff
+
+thermo_style    custom step temp epair etotal press density
+thermo          100
+dump            1 all custom 100 dumpidtype.dat id type q x y z
+
+# fix		        1 all npt temp 300.0 300.0 $(100.0*dt) iso 1.0 1.0 $(1000.0*dt)
+fix		        1 all nvt temp 6000.0 6000.0 $(100.0*dt)
+run		        100000
+unfix           1
+
+fix		        1 all nvt temp 6000.0 300.0 $(100.0*dt)
+run		        10000
+unfix           1
+
+fix		        1 all nvt temp 300.0 300.0 $(100.0*dt)
+run		        100000

@@ -1,0 +1,103 @@
+variable randomSeedForDeposit equal 12345
+
+# deposit molecules on materials and measure sticking coefficients
+
+dimension      3
+boundary       p p f
+units		   real
+atom_style	   charge
+
+variable       dt equal 0.25 # units=fs
+timestep       ${dt}
+read_data	   ../../get.equilibrated.SiO2.300K/SiO2.300K.equilibrated.dat
+
+variable       box_zh equal 80
+change_box     all z final $(xlo) $(v_box_zh) units box
+
+# freeze the bottom layer
+variable       material_height equal 35.2
+variable       freeze_below_z equal 0.2*v_material_height
+region         freeze_block block INF INF INF INF INF ${freeze_below_z} units box
+region         mobile_block block INF INF INF INF ${freeze_below_z} INF units box
+group		   freeze_group region freeze_block
+group          mobile_group region mobile_block
+fix        1   freeze_group setforce 0.0 0.0 0.0
+
+# NVT for middle region and NVE for top region
+variable       between_nvt_and_nve equal 0.8*v_material_height
+region         middle_nvt_block block INF INF INF INF ${freeze_below_z} ${between_nvt_and_nve} units box
+region         top_nve_block    block INF INF INF INF ${between_nvt_and_nve} INF units box
+group          middle_nvt_group region middle_nvt_block
+group          top_nve_group    region top_nve_block
+
+pair_style	   hybrid reax/c NULL zbl 8.0 10.0
+pair_coeff	   * * reax/c ../../ffield.reax.combined.COFSi.v4 Si O C F NULL
+# pair_coeff	   * * reax/c ../../ffield_Kapton Si O C F NULL
+# pair_coeff	   * * ffield.reax.CHOSi Si O
+pair_coeff     1 5 zbl 14.0 18.0
+pair_coeff     2 5 zbl  8.0 18.0
+pair_coeff     3 5 zbl  6.0 18.0
+pair_coeff     4 5 zbl  9.0 18.0
+pair_coeff     5 5 zbl 18.0 18.0
+
+neighbor	   2. bin
+neigh_modify   every 10 delay 0 check no
+fix        2   all qeq/reax 1 0.0 10.0 1e-6 reax/c
+
+# # initial minimisation
+# thermo_style   custom step temp epair etotal press
+# thermo         10
+# minimize       1.0e-6 1.0e-6 100000 100000
+# reset_timestep 0
+
+compute        mobile_temp mobile_group temp
+compute_modify mobile_temp dynamic/dof yes
+
+dump           1 all custom 100 dumpidtype.dat id type x y z
+thermo_style   custom step temp pe ke etotal press vol density
+thermo         100
+thermo_modify  lost warn temp mobile_temp
+
+# fix		   3   mobile_group nvt temp 300.0 300.0 $(100.0*dt)
+fix		   3   middle_nvt_group nvt temp 300.0 300.0 $(100.0*dt)
+fix		   4   top_nve_group nve
+
+# read molecule data file
+molecule       mol_deposit  ../../molecules/data.molecule.CF
+
+# deposit molecules on top of materials
+variable       num_of_insert   equal 3000
+variable       delta_step_insert   equal 1000
+
+# variable       randomSeedForDeposit equal 1234
+variable       offset_for_atom_types equal 2 # 0
+variable       deposit_slab_zl equal v_box_zh-10
+variable       deposit_slab_zh equal v_box_zh-10
+
+variable       in_mass_amu equal 31.0091
+variable       in_mass_kg equal 1.66054E-27*v_in_mass_amu # (12.0107+4*18.9984)
+variable       in_angle_degree equal 0 # random(0,60,${randomSeedForDeposit}) # degree
+variable       in_energy equal 1.0 # eV
+variable       in_angle equal v_in_angle_degree/180*3.1415926 # rad
+variable       in_angle_phi equal random(0,6.2831852,${randomSeedForDeposit}) # rad
+variable       in_velocity equal sqrt(2*v_in_energy*1.602E-19/(v_in_mass_kg))/100/1000 # Angstrom/fs
+variable       in_vz equal -v_in_velocity*cos(v_in_angle)
+variable       in_vy equal v_in_velocity*sin(v_in_angle)*cos(v_in_angle_phi)
+variable       in_vx equal v_in_velocity*sin(v_in_angle)*sin(v_in_angle_phi)
+
+group	       addatoms type 3 4 5
+region         deposit_slab block EDGE EDGE EDGE EDGE ${deposit_slab_zl} ${deposit_slab_zh} units box
+fix		   5   addatoms deposit ${num_of_insert} ${offset_for_atom_types} ${delta_step_insert} ${randomSeedForDeposit} &
+               region deposit_slab near 3.0 id next mol mol_deposit vx ${in_vx} ${in_vx} vy ${in_vy} ${in_vy} vz ${in_vz} ${in_vz} units box
+
+fix        6   addatoms nve
+
+# remove atoms using "oneway" to fix the issues of partially removing molecules
+variable       evaporate_slab_zl equal v_box_zh-5
+region         evaporate_slab block EDGE EDGE EDGE EDGE ${evaporate_slab_zl} EDGE units box
+fix        7   all oneway 100 evaporate_slab z
+
+variable       run_step equal (v_num_of_insert+10)*v_delta_step_insert
+run		       ${run_step}
+
+write_data     SiO2.300K.sticked.dat

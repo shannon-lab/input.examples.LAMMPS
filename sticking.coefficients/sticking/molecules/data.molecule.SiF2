@@ -1,0 +1,21 @@
+# SiF4 tetrahedral structure molecule data file
+
+3 atoms
+
+Coords
+
+1    0.0000    0.0000    0.0000 # Si
+2   -0.5772    0.8333    1.2341 # F
+3   -1.0269   -1.1610   -0.3852 # F
+
+Types
+
+1 1
+2 4
+3 4
+
+Charges
+
+1 0.0
+2 0.0
+3 0.0

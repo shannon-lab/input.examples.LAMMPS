@@ -1,0 +1,53 @@
+# input file to generate a silica glass
+units           metal
+dimension       3
+processors      * * *
+boundary        p p p
+
+# read data
+atom_style      charge
+read_data       initials/generated.3000.sample.1.dat
+
+# potential
+pair_style tersoff
+pair_coeff * * /home/d/projects/LAMMPS/potentials/SiO.tersoff Si O
+# pair_coeff * * /usr/local/apps/lammps/lammps-7Aug19/potentials/SiO.tersoff Si O
+# pair_style vashishta
+# pair_coeff * * /home/d/projects/LAMMPS/potentials/SiO.1997.vashishta Si O
+
+# outputs
+compute         msd all msd com yes
+thermo          100
+thermo_style    custom step temp pe vol press density c_msd[4]
+thermo_modify   lost warn
+
+dump            1 all custom 100 SiO2.dump id type x y z
+
+variable dt equal 0.001 # 0.001ps = 1fs
+timestep    ${dt}
+
+# initial minimisation
+minimize        1.0e-10 1.0e-10 100000 100000
+
+reset_timestep    0
+
+# initial mixing
+fix             1 all nvt temp 5000 5000 $(100.0*dt)
+run             200000
+unfix           1
+
+fix             1 all npt temp 5000 5000 $(100.0*dt) iso 0 0 $(1000.0*dt)
+run             100000
+unfix           1
+
+# cooling at 1 K/ps
+fix             1 all npt temp 5000 300 $(100.0*dt) iso 0 0 $(1000.0*dt)
+run             4700000
+unfix           1
+
+# final relaxation
+fix             1 all npt temp 300 300 $(100.0*dt) iso 0 0 $(1000.0*dt)
+run             100000
+
+write_data      S300K.atoms.3000.dat
+write_restart   S300K.atoms.3000.rest

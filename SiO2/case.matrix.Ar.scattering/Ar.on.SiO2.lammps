@@ -1,0 +1,77 @@
+variable a loop 200
+log data/log.$a
+variable randomSeedForDeposit equal floor(random(1,9999,${a}))
+
+# input file to generate a silica glass
+units           metal
+dimension       3
+processors      * * *
+boundary        p p f
+
+# read data
+atom_style      charge
+
+region          sim_box block 0 30 0 30 0 60
+create_box      3 sim_box
+read_data       ../../../../results/sample.1.S300K.dat add merge
+
+mass		3   39.948
+set atom 3 charge 1.0
+
+# potential
+# pair_style tersoff
+pair_style hybrid tersoff zbl 8.0 10.0 coul/cut 10.0
+pair_coeff * * tersoff /usr/local/apps/lammps/lammps-7Aug19/potentials/SiO.tersoff Si O NULL
+# pair_coeff * * tersoff /home/d/projects/LAMMPS/potentials/SiO.tersoff Si O NULL
+pair_coeff 1 3 zbl 14.0 18.0
+pair_coeff 2 3 zbl  8.0 18.0
+pair_coeff 3 3 coul/cut
+
+variable dt equal 0.0005
+timestep    ${dt}
+
+# freeze the bottom layer
+variable    sub_zh equal 35.18
+variable    freeze_below_z equal 0.2*v_sub_zh
+region      freeze_block block INF INF INF INF INF ${freeze_below_z} units box
+region      mobile_block block INF INF INF INF ${freeze_below_z} INF units box
+group		freeze_group region freeze_block
+group       mobile_group region mobile_block
+fix     1   freeze_group setforce 0.0 0.0 0.0
+
+# Equlibrate SiO2 at 300K
+fix     2   mobile_group nvt temp 300 300 $(100.0*dt)
+fix		3   mobile_group wall/reflect zlo EDGE
+
+thermo          100
+thermo_style    custom step temp pe ke etotal press vol lx density
+thermo_modify   lost warn
+
+if "$a <= 10" then "dump 1 all custom 100 data/md.SiO2.$a.txt id type x y z"
+# Equlibrate SiO2 at 300K for 2ps
+run     4000
+
+region   deposit_slab block EDGE EDGE EDGE EDGE $((zhi-zlo)*0.9+zlo) $((zhi-zlo)*0.95+zlo) units box
+variable num_of_insert equal 10
+variable delta_step_insert equal 2000 # 1ps
+
+variable in_angle_degree equal XXX # degree
+variable in_energy equal YYY # eV
+variable in_angle equal v_in_angle_degree/180*3.1415926 # rad
+variable in_velocity equal sqrt(2*v_in_energy*1.602E-19/6.633E-26)/100 # Angstrom/ps
+variable in_vz equal -v_in_velocity*cos(v_in_angle)
+variable in_vy equal v_in_velocity*sin(v_in_angle)
+
+group	  addatoms type 3
+fix		4 addatoms nve
+fix		5 addatoms deposit ${num_of_insert} 3 ${delta_step_insert} ${randomSeedForDeposit} region deposit_slab near 1.0 id next &
+    vz ${in_vz} ${in_vz} vy ${in_vy} ${in_vy} units box
+
+dump	2 addatoms custom 100 data/dump.velocity.$a.txt id type xs ys zs vx vy vz
+
+variable run_step equal (v_num_of_insert+3)*v_delta_step_insert
+run     ${run_step}
+
+clear
+next a
+jump Ar.on.SiO2.lammps

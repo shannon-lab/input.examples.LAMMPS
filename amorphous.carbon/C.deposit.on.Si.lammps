@@ -1,0 +1,112 @@
+variable a loop 1
+log data/log.$a
+variable randomSeedForDeposit equal floor(random(1,9999,${a}))
+
+# input file to generate a silica glass
+units           metal
+dimension       3
+processors      * * *
+boundary        p p f
+
+# read data
+atom_style      atomic
+
+
+variable xl equal 0
+variable xh equal 23
+variable yl equal 0
+variable yh equal 23
+variable zl equal 0
+variable zh equal 120
+
+region          box block ${xl} ${xh} ${yl} ${yh} ${zl} ${zh}
+create_box      2 box
+
+
+variable sub_zl equal ${zl}
+variable sub_zh equal 59.7
+region		substrate block ${xl} ${xh} ${yl} ${yh} ${sub_zl} ${sub_zh}
+lattice		diamond 5.4307 orient x 1 1 0 orient y -1 1 0 orient z 0 0 1
+create_atoms	1 region substrate
+
+mass		1 28.0 # Si
+mass		2 12.0 # C
+
+# potential
+pair_style tersoff
+pair_coeff * * /usr/local/apps/lammps/lammps-7Aug19/potentials/SiC_Erhart-Albe.tersoff Si C
+# pair_coeff * * /home/d/projects/LAMMPS/potentials/SiC_Erhart-Albe.tersoff Si C
+
+variable dt equal 0.0005 # 0.5fs
+timestep    ${dt}
+
+group Si_only type 1
+
+variable    freeze_zh equal 0.2*${sub_zh}
+region      freeze_block block INF INF INF INF INF ${freeze_zh} units box
+group		freeze_group region freeze_block
+fix     1   freeze_group setforce 0.0 0.0 0.0
+
+thermo          100
+thermo_style    custom step temp pe ke etotal press vol lx density
+thermo_modify   lost warn
+dump    1 all custom 200 data/md.lammpstrj.$a.txt id type x y z
+
+# heating from 300K to 800K for 10ps
+fix     2 Si_only nvt temp 300 800 $(100.0*dt)
+run     20000
+unfix   2
+
+# maintaining at 800K for 5ps
+fix     2 Si_only nvt temp 800 800 $(100.0*dt)
+run     10000
+unfix   2
+
+# cooling from 800K to 300K for 10ps
+fix     2 Si_only nvt temp 800 300 $(100.0*dt)
+run     20000
+unfix   2
+
+# maintaining at 300K for 5ps and keep 300K for later
+fix     2 Si_only nvt temp 300 300 $(100.0*dt)
+run     10000
+
+fix		3 Si_only wall/reflect zlo EDGE
+
+# ------------------------------------------------------------------------------
+# Carbon deposition process
+
+variable slab_xl equal (${xh}-${xl})*0.0+${xl}
+variable slab_xh equal (${xh}-${xl})*1.0+${xl}
+variable slab_yl equal (${yh}-${yl})*0.0+${yl}
+variable slab_yh equal (${yh}-${yl})*1.0+${yl}
+variable slab_zl equal (${zh}-${zl})*0.9+${zl}
+variable slab_zh equal (${zh}-${zl})*0.95+${zl}
+
+region          slab block ${slab_xl} ${slab_xh} ${slab_yl} ${slab_yh} ${slab_zl} ${slab_zh} units box
+
+variable num_of_insert equal 2000 #XXXX
+variable delta_step_insert equal 4000 # 2ps
+
+variable in_energy equal YYY # eV
+variable in_angle_degree equal 0 # degree
+variable in_angle equal ${in_angle_degree}/180*3.1415926 # rad
+variable in_velocity equal sqrt(2*${in_energy}*1.602E-19/6.633E-26)/100 # Angstrom/ps
+variable in_vz equal -${in_velocity}*cos(${in_angle})
+variable in_vy equal ${in_velocity}*sin(${in_angle})
+
+group	addatoms type 2
+fix		4 addatoms nve
+fix		5 addatoms deposit ${num_of_insert} 2 ${delta_step_insert} ${randomSeedForDeposit} region slab near 1.0 id next &
+    vz ${in_vz} ${in_vz} vy ${in_vy} ${in_vy} units box
+
+dump    2 addatoms custom 200 data/dump.velocity.$a.txt id type xs ys zs vx vy vz
+
+variable run_step equal (${num_of_insert}+8)*${delta_step_insert}
+run     ${run_step}
+
+write_data      ACL.deposit.on.Si.data
+
+clear
+next a
+jump C.deposit.on.Si.lammps

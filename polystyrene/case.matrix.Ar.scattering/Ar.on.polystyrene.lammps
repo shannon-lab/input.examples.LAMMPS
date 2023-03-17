@@ -1,0 +1,109 @@
+variable a loop 200
+log data/log.$a
+variable randomSeedForDeposit equal floor(random(1,9999,${a}))
+
+# VARIABLES
+variable dt equal YYY1 #fs
+
+# General parameters
+units	real
+atom_style        full
+boundary          p p f
+special_bonds     lj/coul 0.0 0.0 0.0
+dielectric        1.0
+
+bond_style        harmonic
+angle_style       harmonic
+dihedral_style    opls
+improper_style    harmonic
+read_data         ../../results/TraPPE.smoothing.and.postprocessing/polystyrene.smooth.and.postprocessed.data
+neighbor          0.3 bin
+
+# hybrid potential for polystyrene and Ar, coeffs for i!=j will be generated automatically using mixing rule
+pair_style hybrid lj/cut 10.0 zbl 8.0 10.0
+pair_coeff 1 1 lj/cut 0.091491 3.95
+pair_coeff 2 2 lj/cut 0.019861 4.65
+pair_coeff 3 3 lj/cut 0.059608 3.7
+pair_coeff 4 4 lj/cut 0.100311 3.695
+pair_coeff 1 5 zbl 8.0 18.0
+pair_coeff 2 5 zbl 7.0 18.0
+pair_coeff 3 5 zbl 6.0 18.0
+pair_coeff 4 5 zbl 7.0 18.0
+pair_coeff 5 5 none
+
+# reset_atom_ids # ignored because HPC lammps doesn't support it yet
+timestep    ${dt}
+
+# delete the top atoms to make the surface smooth
+variable delete_above_z equal 40
+region delete_block block INF INF INF INF ${delete_above_z} INF units box
+group delete_group region delete_block
+delete_atoms group delete_group bond yes
+
+# freeze the bottom layer
+variable z_scale equal 0.5
+variable freeze_below_z equal (zhi-zlo)/(1+v_z_scale)*0.1+zlo
+region   freeze_block block INF INF INF INF INF ${freeze_below_z} units box
+region   mobile_block block INF INF INF INF ${freeze_below_z} INF units box
+group	 freeze_group region freeze_block
+group    mobile_group region mobile_block
+fix     1   freeze_group setforce 0.0 0.0 0.0
+
+# remove the sputtered material
+variable evaporate_above_z equal 50
+region   evaporate_block block INF INF INF INF ${evaporate_above_z} INF units box
+fix 7    mobile_group evaporate 100 100 evaporate_block ${randomSeedForDeposit}
+
+# fix		2 all wall/reflect zlo EDGE
+fix		3 mobile_group wall/reflect zhi EDGE
+
+# # Minimization parameters
+# min_style         cg  # hftn
+# min_modify        dmax 0.02
+# min_modify        line quadratic  # backtrack
+
+# neigh_modify      every 1 delay 0
+# minimize          1.0e-9 1.0e-9 5000 100000
+
+# MD parameters
+neigh_modify	every 1 delay 5
+reset_timestep    0
+
+thermo_style      custom step temp pe vol press density
+thermo            100
+thermo_modify     lost warn lost/bond ignore flush yes
+
+if "$a <= 10" then "dump 1 all custom 100 data/md.polystyrene.$a.txt id type x y z"
+
+variable final_temp equal 300 # K
+fix 4 mobile_group nvt temp ${final_temp} ${final_temp} $(100.0*dt)
+run 10000 #
+
+# creating deposition block for Ar
+region deposit_slab block EDGE EDGE EDGE EDGE $((zhi-zlo)*0.9+zlo) $((zhi-zlo)*0.95+zlo) units box
+variable num_of_insert equal 10 #XXXX
+variable delta_step_insert equal YYY2 # 2000fs=2ps
+
+variable in_angle_degree equal XXX # degree
+variable in_energy equal YYY # eV
+variable in_angle equal v_in_angle_degree/180*3.1415926 # rad
+variable in_velocity equal sqrt(2*v_in_energy*1.602E-19/6.633E-26)/100/1000 # Angstrom/fs
+variable in_vz equal -v_in_velocity*cos(v_in_angle)
+variable in_vy equal v_in_velocity*sin(v_in_angle)
+
+group	addatoms type 5
+fix		5 addatoms nve
+fix		6 addatoms deposit ${num_of_insert} 5 ${delta_step_insert} ${randomSeedForDeposit} region deposit_slab near 1.0 id next &
+    vz ${in_vz} ${in_vz} vy ${in_vy} ${in_vy} units box
+
+dump    2 addatoms custom 50 data/dump.velocity.$a.txt id type xs ys zs vx vy vz
+
+variable run_step equal (${num_of_insert}+5)*${delta_step_insert}
+run     ${run_step}
+
+# write_data      polystyrene.data
+# write_restart   polystyrene.restart
+
+clear
+next a
+jump Ar.on.polystyrene.lammps

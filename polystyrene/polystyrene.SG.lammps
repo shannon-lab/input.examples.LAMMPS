@@ -1,0 +1,67 @@
+# VARIABLES
+variable dt equal 2 #fs
+
+# General parameters
+units	real
+atom_style        full
+boundary          p p p
+special_bonds     lj/coul 0.0 0.0 0.0
+dielectric        1.0
+pair_style        lj/cut  10.0
+bond_style        harmonic
+angle_style       harmonic
+dihedral_style    opls
+improper_style    harmonic
+read_data         ../output_reseted_atom_types.txt
+neighbor          0.3 bin
+
+timestep    ${dt}
+
+# # Minimization parameters
+# min_style         cg  # hftn
+# min_modify        dmax 0.02
+# min_modify        line quadratic  # backtrack
+
+neigh_modify      every 1 delay 0
+minimize          1.0e-9 1.0e-9 5000 100000
+
+# MD parameters
+neigh_modify	every 1 delay 5
+
+# kspace_style      pppm 1e-4
+
+# run_style         respa 3 2 2 bond 1 pair 2 kspace 3
+# velocity all create 300.0 1626883242 loop geom
+reset_timestep    0
+
+thermo_style      custom step temp pe vol press density
+thermo            100
+thermo_modify     flush yes
+
+dump              1 all custom 100 polystyrene.dump id type x y z
+
+fix 1 all npt temp 600.0 600.0 $(100.0*dt) iso 1 1 $(1000.0*dt)
+run 2000000 # 4ns
+unfix 1
+
+variable final_temp equal 300 # K
+
+fix 1 all npt temp 600.0 ${final_temp} $(100.0*dt) iso 1 1 $(1000.0*dt)
+run 2000000 # 4ns
+unfix 1
+
+# # compute msd and diffusion coefficient, 6=2*3  (dimensionality=3)
+# compute           msd all msd com yes
+# variable          twopoint equal c_msd[4]/6/((step-4000000)*dt+1.0e-6)
+# fix               9 all vector 10 c_msd[4]
+# variable          fitslope equal slope(f_9)/6/(10*dt)
+
+# thermo_style      custom step temp pe vol press density c_msd[4] v_fitslope v_twopoint
+thermo_style      custom step temp pe vol press density
+thermo            100
+
+fix 1 all npt temp ${final_temp} ${final_temp} $(100.0*dt) iso 1 1 $(1000.0*dt)
+run 1000000 # 2ns
+
+write_data      polystyrene.data
+write_restart   polystyrene.restart
